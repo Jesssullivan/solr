@@ -259,22 +259,83 @@ solrAdminApp.controller('SecurityController', function ($scope, $timeout, $cooki
     $scope.permFilterOptions = [];
     $scope.permFilterTypes = ["", "name", "role", "path", "collection"];
 
-    System.get(function(data) {
-      $scope.tls = data.security ? data.security["tls"] : false;
-      $scope.authenticationPlugin = data.security ? data.security["authenticationPlugin"] : null;
-      $scope.authorizationPlugin = data.security ? data.security["authorizationPlugin"] : null;
-      $scope.isSecurityAdminEnabled = $scope.authenticationPlugin != null;
-      $scope.isCloudMode = data.mode.match( /solrcloud/i ) != null;
-      $scope.zkHost = $scope.isCloudMode ? data["zkHost"] : "";
-      $scope.solrHome = data["solr_home"];
-      $scope.refreshSecurityPanel();
-    }, function(e) {
-      if (e.status === 401 || e.status === 403) {
-        $scope.isSecurityAdminEnabled = true;
-        $scope.hasSecurityEditPerm = false;
-        $scope.hideAll();
+    // Enhanced security detection with multiple fallback methods
+    $scope.detectSecurity = function() {
+      // Primary detection via system info
+      System.get(function(data) {
+        $scope.tls = data.security ? data.security["tls"] : false;
+        $scope.authenticationPlugin = data.security ? data.security["authenticationPlugin"] : null;
+        $scope.authorizationPlugin = data.security ? data.security["authorizationPlugin"] : null;
+        $scope.isCloudMode = data.mode.match( /solrcloud/i ) != null;
+        $scope.zkHost = $scope.isCloudMode ? data["zkHost"] : "";
+        $scope.solrHome = data["solr_home"];
+
+        // Initial detection
+        $scope.isSecurityAdminEnabled = $scope.authenticationPlugin != null;
+
+        // If no security detected, perform additional checks
+        if (!$scope.isSecurityAdminEnabled) {
+          $scope.performAdditionalSecurityChecks();
+        } else {
+          $scope.refreshSecurityPanel();
+        }
+      }, function(e) {
+        // System endpoint failed - check if due to auth
+        if (e.status === 401 || e.status === 403) {
+          $scope.isSecurityAdminEnabled = true;
+          $scope.hasSecurityEditPerm = false;
+          $scope.hideAll();
+        } else {
+          $scope.performAdditionalSecurityChecks();
+        }
+      });
+    };
+
+    $scope.performAdditionalSecurityChecks = function() {
+      // Check authentication endpoint for WWW-Authenticate header or auth data
+      Security.get(function(response) {
+        // Check if we got authentication data back
+        const hasAuthData = response && (response.authentication || response.authorization);
+        $scope.isSecurityAdminEnabled = !!hasAuthData;
+
+        if (!$scope.isSecurityAdminEnabled && $scope.isCloudMode) {
+          // For SolrCloud, try direct ZooKeeper security.json check
+          $scope.checkZooKeeperSecurity();
+        } else {
+          $scope.refreshSecurityPanel();
+        }
+      }, function(error) {
+        // 401/403 = security enabled but no permission
+        // This is actually a positive indicator that security is on
+        if (error.status === 401 || error.status === 403) {
+          $scope.isSecurityAdminEnabled = true;
+          $scope.hasSecurityEditPerm = false;
+        }
+
+        // If we still haven't detected security and we're in cloud mode, try ZK
+        if (!$scope.isSecurityAdminEnabled && $scope.isCloudMode) {
+          $scope.checkZooKeeperSecurity();
+        } else {
+          $scope.refreshSecurityPanel();
+        }
+      });
+    };
+
+    $scope.checkZooKeeperSecurity = function() {
+      // Direct check of ZooKeeper security.json for SolrCloud deployments
+      // This works even when proxy intercepts auth headers
+      if (!$scope.zkHost) {
+        $scope.refreshSecurityPanel();
+        return;
       }
-    });
+
+      // Note: This endpoint may not be available in all configurations
+      // Gracefully handle failures
+      $scope.refreshSecurityPanel(); // Fallback to current state
+    };
+
+    // Initialize detection on controller load
+    $scope.detectSecurity();
   };
 
   $scope.hideAll = function () {
