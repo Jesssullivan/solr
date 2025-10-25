@@ -1,0 +1,136 @@
+version: '3.8'
+
+# SOLR-17977 Test Infrastructure
+# Three-way comparison: Baseline (bug) vs Patched Legacy UI (fix) vs New UI (already works)
+# All behind Caddy reverse proxy with BasicAuth passthrough
+# Credentials: admin/admin (SHA-256: IV0EHq1OnNrj6gvRCwvFwTrZ1+z1oBbnQdiVC3otuq0= Ndd7LKvVBAaZIF0QAVi1ekCfAJXr1GGfLtRUXhgrF8c=)
+#
+# Stack Layout:
+#   Port 8080: Baseline (Vanilla Solr 10.0.0 - Legacy UI shows bug)
+#   Port 8081: Patched Legacy UI (With SOLR-17977 fix)
+#   Port 8082: New UI (Kotlin/Compose - already handles proxies correctly)
+
+services:
+  # Shared ZooKeeper for all three stacks
+  zookeeper:
+    image: zookeeper:3.9.3
+    container_name: solr-17977-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=zookeeper:2888:3888;2181
+    volumes:
+      - zk-data:/data
+      - zk-datalog:/datalog
+    networks:
+      - solr-test
+
+  # BASELINE STACK (Vanilla apache/solr main - demonstrates bug)
+  solr-baseline:
+    build:
+      context: ../..
+      dockerfile: tests/solr-17977-admin-ui-detection/baseline/Dockerfile
+    container_name: solr-17977-baseline
+    depends_on:
+      - zookeeper
+    environment:
+      ZK_HOST: zookeeper:2181
+      SOLR_MODE: solrcloud
+      SOLR_OPTS: "-Dsolr.autoSoftCommit.maxTime=3000"
+      SOLR_JETTY_HOST: "0.0.0.0"
+    ports:
+      - "8983:8983"
+    volumes:
+      - solr-baseline-data:/var/solr
+    networks:
+      - solr-test
+
+  caddy-baseline:
+    image: caddy:2.10.2-alpine
+    container_name: solr-17977-caddy-baseline
+    depends_on:
+      - solr-baseline
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./baseline/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - solr-test
+
+  # PATCHED STACK (Built from dev branch - demonstrates fix)
+  solr-patched:
+    build:
+      context: ../..
+      dockerfile: tests/solr-17977-admin-ui-detection/patched/Dockerfile
+    container_name: solr-17977-patched
+    depends_on:
+      - zookeeper
+    environment:
+      ZK_HOST: zookeeper:2181
+      SOLR_MODE: solrcloud
+      SOLR_OPTS: "-Dsolr.autoSoftCommit.maxTime=3000"
+      SOLR_JETTY_HOST: "0.0.0.0"
+    ports:
+      - "8984:8983"
+    volumes:
+      - solr-patched-data:/var/solr
+      - ./patched/security.json:/tmp/security.json:ro
+    networks:
+      - solr-test
+
+  caddy-patched:
+    image: caddy:2.10.2-alpine
+    container_name: solr-17977-caddy-patched
+    depends_on:
+      - solr-patched
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./patched/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - solr-test
+
+  # NEW UI STACK (Built from dev branch - demonstrates new UI already works)
+  solr-newui:
+    build:
+      context: ../..
+      dockerfile: tests/solr-17977-admin-ui-detection/newui/Dockerfile
+    container_name: solr-17977-newui
+    depends_on:
+      - zookeeper
+    environment:
+      ZK_HOST: zookeeper:2181
+      SOLR_MODE: solrcloud
+      SOLR_OPTS: "-Dsolr.autoSoftCommit.maxTime=3000"
+      SOLR_JETTY_HOST: "0.0.0.0"
+    ports:
+      - "8985:8983"
+    volumes:
+      - solr-newui-data:/var/solr
+      - ./newui/security.json:/tmp/security.json:ro
+    networks:
+      - solr-test
+
+  caddy-newui:
+    image: caddy:2.10.2-alpine
+    container_name: solr-17977-caddy-newui
+    depends_on:
+      - solr-newui
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./newui/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - solr-test
+
+volumes:
+  zk-data:
+  zk-datalog:
+  solr-baseline-data:
+  solr-patched-data:
+  solr-newui-data:
+
+networks:
+  solr-test:
+    driver: bridge

@@ -1,0 +1,78 @@
+# Simplified Caddyfile for SOLR-17977 New UI Test
+# Demonstrates the new UI
+# does not appear quite right yet, though I am
+# still wending through the new UI codebase (it looks awesome!)
+
+:8082 {
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+
+    # Health check endpoint (no auth)
+    handle /health {
+        respond "healthy" 200
+    }
+
+    # Public endpoints (no auth required for bootstrap)
+    @public_endpoints {
+        path /solr/admin/ping
+        path /solr/admin/info/health
+        path /solr/admin/info/system
+        path /api/node/system
+    }
+
+    handle @public_endpoints {
+        reverse_proxy solr-newui:8983 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # All Solr paths - pass through client auth
+    handle /solr/* {
+        reverse_proxy solr-newui:8983 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Pass through client Authorization header
+            header_up Authorization {header.Authorization}
+        }
+    }
+
+    # New UI paths
+    handle /ui/* {
+        reverse_proxy solr-newui:8983 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Pass through client Authorization header
+            header_up Authorization {header.Authorization}
+        }
+    }
+
+    # API paths for new UI
+    handle /api/* {
+        reverse_proxy solr-newui:8983 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Pass through client Authorization header
+            header_up Authorization {header.Authorization}
+        }
+    }
+
+    # Root redirect to new UI
+    handle / {
+        redir /ui/ 301
+    }
+}

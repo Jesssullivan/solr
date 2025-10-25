@@ -1,0 +1,49 @@
+# Simplified Caddyfile for SOLR-17977 Baseline Test
+# Demonstrates the bug: Admin UI shows "Security not enabled" despite BasicAuth
+
+:8080 {
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+
+    # Health check endpoint (no auth)
+    handle /health {
+        respond "healthy" 200
+    }
+
+    # Public endpoints (no auth required for bootstrap)
+    @public_endpoints {
+        path /solr/admin/ping
+        path /solr/admin/info/health
+        path /solr/admin/info/system
+    }
+
+    handle @public_endpoints {
+        reverse_proxy solr-baseline:8983 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # All other Solr paths - pass through client auth
+    handle /solr/* {
+        reverse_proxy solr-baseline:8983 {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Pass through client Authorization header
+            header_up Authorization {header.Authorization}
+        }
+    }
+
+    # Root redirect
+    handle / {
+        redir /solr/ 301
+    }
+}
